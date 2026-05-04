@@ -2,6 +2,8 @@
 
 基于 IPC 层级结构 + 语义向量的专利相似度批量计算流水线。
 
+> 快速了解业务逻辑：[在线演示](https://leoi-jr.github.io/patent-similarity/slides.html)
+
 ## 原理
 
 相似度分数由三部分加权合成：

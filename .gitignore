@@ -1,8 +1,12 @@
 # 数据文件
-patent_data/
-patent_embedding/
-similarity_results_gpu/
-model/
+patent_data/*
+!patent_data/.gitkeep
+patent_embedding/*
+!patent_embedding/.gitkeep
+similarity_results_gpu/*
+!similarity_results_gpu/.gitkeep
+model/*
+!model/.gitkeep
 
 # 大文件
 *.npz
