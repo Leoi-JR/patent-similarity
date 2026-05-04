@@ -20,7 +20,7 @@ EMBEDDING_SAVE_BATCH_SIZE = 1000
 PATENT_DATA_DIR = "patent_data"
 PATENT_EMBEDDING_DIR = "patent_embedding"
 SIMILARITY_OUTPUT_DIR = "similarity_results_gpu"
-IPC_CATEGORIES_FILE = "ipc_categories_updated.csv"
+IPC_CATEGORIES_FILE = "patent_data/ipc_categories_updated.csv"
 MODEL_CACHE_DIR = "/workspace/patent/model"
 
 # 相似度计算：IPC 层级权重
