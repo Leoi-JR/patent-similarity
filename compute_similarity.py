@@ -146,12 +146,56 @@ def process_ipc(ipc_code, gpu_id):
         save_results(accumulated, SIMILARITY_OUTPUT_DIR, f'{ipc_code}_{total_batches}')
 
 
+def worker(gpu_id, ipc_queue):
+    """每个 GPU 对应一个 worker，持续从队列取 IPC 直到队列为空。"""
+    while True:
+        try:
+            ipc_code = ipc_queue.get_nowait()
+        except Exception:
+            break
+        print(f"[GPU {gpu_id}] 开始处理 {ipc_code}")
+        process_ipc(ipc_code, gpu_id)
+        print(f"[GPU {gpu_id}] 完成 {ipc_code}")
+
+
+def scan_ipc_codes():
+    """从 patent_embedding/ 自动扫描已有向量的 IPC 代码。"""
+    import glob
+    codes = set()
+    for f in glob.glob(os.path.join(PATENT_EMBEDDING_DIR, 'patent_brief_*_embeddings_0.npz')):
+        name = os.path.basename(f)
+        code = name.replace('patent_brief_', '').replace('_embeddings_0.npz', '')
+        codes.add(code)
+    return sorted(codes)
+
+
 if __name__ == '__main__':
+    import multiprocessing as mp
+
     parser = argparse.ArgumentParser(description='专利相似度计算')
-    parser.add_argument('--gpu', type=int, default=0, help='GPU 编号')
-    parser.add_argument('--ipc', type=str, required=True,
-                        help='IPC 代码，逗号分隔，如 G06F,G01N')
+    parser.add_argument('--gpus', type=str, default='0',
+                        help='GPU 编号，逗号分隔，如 0,1,2')
+    parser.add_argument('--ipc', type=str, default=None,
+                        help='IPC 代码，逗号分隔；不指定则自动扫描 patent_embedding/')
     args = parser.parse_args()
 
-    for ipc_code in tqdm(args.ipc.split(','), desc="处理 IPC"):
-        process_ipc(ipc_code.strip(), args.gpu)
+    gpu_ids = [int(g.strip()) for g in args.gpus.split(',')]
+    ipc_codes = [c.strip() for c in args.ipc.split(',')] if args.ipc else scan_ipc_codes()
+
+    if not ipc_codes:
+        print("未找到任何 IPC 代码，请确认 patent_embedding/ 目录或通过 --ipc 指定。")
+        exit(1)
+
+    print(f"共 {len(ipc_codes)} 个 IPC，使用 GPU: {gpu_ids}")
+
+    queue = mp.Queue()
+    for code in ipc_codes:
+        queue.put(code)
+
+    processes = [mp.Process(target=worker, args=(gpu_id, queue)) for gpu_id in gpu_ids]
+    for p in processes:
+        p.start()
+    for p in processes:
+        p.join()
+
+    print("所有 IPC 处理完成。")
