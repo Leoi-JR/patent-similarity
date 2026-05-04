@@ -1,21 +1,19 @@
 """
-冒烟测试：用小批量 fixture 数据验证相似度计算流程的完整可用性。
+冒烟测试：用小批量 fixture 数据验证相似度计算流程的完整可用性（CPU，无需 GPU）。
 
 运行方式：
-    /opt/conda/envs/patent/bin/python tests/test_compute_similarity.py
+    /opt/conda/envs/patent/bin/pytest tests/test_compute_similarity.py -v
 """
 
 import gc
 import os
-import sys
 import tempfile
 
 import numpy as np
 import pandas as pd
+import pytest
 from scipy.sparse import csr_matrix
 
-# 将项目根目录加入路径，以便 import config
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import config
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
@@ -96,7 +94,6 @@ def test_load_data():
     assert len(df) > 0, "merged_df 为空"
     for col in ['id', 'level3_code', 'level4_code', 'level5_code']:
         assert col in df.columns, f"缺少列: {col}"
-    print(f"  [PASS] load_data: {len(df)} 条记录")
 
 
 def test_feature_matrices():
@@ -106,7 +103,6 @@ def test_feature_matrices():
     for level in config.IPC_WEIGHTS:
         assert level in matrices
         assert matrices[level].shape[0] == n
-    print(f"  [PASS] create_feature_matrices: n={n}, levels={list(matrices.keys())}")
 
 
 def test_embeddings_shape():
@@ -114,7 +110,6 @@ def test_embeddings_shape():
     title = np.load(TITLE_EMB_FILE)
     assert brief['embeddings'].shape[1] == title['embeddings'].shape[1], "brief/title 向量维度不一致"
     assert len(brief['ids']) == len(title['ids']), "brief/title id 数量不一致"
-    print(f"  [PASS] embeddings shape: {brief['embeddings'].shape}")
 
 
 def test_similarity_output():
@@ -149,17 +144,7 @@ def test_similarity_output():
         assert list(loaded.columns) == ['patent_id', 'similar_patent_id', 'similarity_score']
         assert len(loaded) == len(results)
 
-    print(f"  [PASS] similarity_output: {len(results)} 条结果，score 范围正常，parquet 读写正常")
 
 
 if __name__ == '__main__':
-    print("=== 开始冒烟测试 ===")
-    tests = [test_load_data, test_feature_matrices, test_embeddings_shape, test_similarity_output]
-    passed = 0
-    for t in tests:
-        try:
-            t()
-            passed += 1
-        except Exception as e:
-            print(f"  [FAIL] {t.__name__}: {e}")
-    print(f"=== 完成：{passed}/{len(tests)} 通过 ===")
+    pytest.main([__file__, '-v'])

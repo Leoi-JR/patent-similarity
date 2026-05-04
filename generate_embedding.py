@@ -1,11 +1,20 @@
 import requests
 import json
 import pandas as pd
-import time
 import numpy as np
 from tqdm import tqdm
 import os
+import glob
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
+
+from config import (
+    EMBEDDING_SERVERS,
+    EMBEDDING_BATCH_SIZES,
+    EMBEDDING_SAVE_BATCH_SIZE,
+    PATENT_DATA_DIR,
+    PATENT_EMBEDDING_DIR,
+)
 
 
 
@@ -81,122 +90,73 @@ def process_embeddings(patent_df, field, id_field, batch_size, output_file, base
 
 def save_batch(embeddings, ids, id_field, output_file):
     """保存一个批次的嵌入向量到NPZ文件"""
-    # 将文件扩展名改为.npz
     if not output_file.endswith('.npz'):
         output_file = os.path.splitext(output_file)[0] + '.npz'
-    
-    # 将嵌入向量转换为numpy数组
+
     embeddings_array = np.array(embeddings)
     ids_array = np.array(ids)
-    
-    # 保存到NPZ文件
+
     np.savez_compressed(
         output_file,
         embeddings=embeddings_array,
         ids=ids_array
     )
-    
+
     print(f"数据已保存到 {output_file}")
 
+
+def process_file(ipc_code, base_url,
+                 patent_data_dir=None, patent_embedding_dir=None,
+                 batch_sizes=None, save_batch_size=None):
+    """处理单个 IPC 代码的 title 和 brief 向量化。"""
+    _patent_data_dir = patent_data_dir or PATENT_DATA_DIR
+    _patent_embedding_dir = patent_embedding_dir or PATENT_EMBEDDING_DIR
+    _batch_sizes = batch_sizes or EMBEDDING_BATCH_SIZES
+    _save_batch_size = save_batch_size or EMBEDDING_SAVE_BATCH_SIZE
+
+    patent_file = os.path.join(_patent_data_dir, f'patent_data_{ipc_code}_cleaned.csv')
+    patent_df = pd.read_csv(patent_file).fillna("")
+
+    for field, batch_size in _batch_sizes.items():
+        print(f"开始处理 {ipc_code} 的 {field}，使用服务 {base_url}")
+        output_file = os.path.join(_patent_embedding_dir, f'patent_{field}_{ipc_code}_embeddings.npz')
+        process_embeddings(patent_df, field, 'id', batch_size, output_file,
+                           base_url=base_url, save_batch_size=_save_batch_size)
+
+    print(f"完成处理 {ipc_code}")
+
+
+
 if __name__ == "__main__":
-    # 服务器地址
-    base_urls = [
-        "http://localhost:5000",
-        "http://localhost:5001",
-        "http://localhost:5002", 
-        "http://localhost:5003",
-        "http://localhost:5005"
+    os.makedirs(PATENT_EMBEDDING_DIR, exist_ok=True)
+
+    IPC_3s = [
+        os.path.basename(f).replace("patent_data_", "").replace("_cleaned.csv", "")
+        for f in glob.glob(os.path.join(PATENT_DATA_DIR, "patent_data_*_cleaned.csv"))
     ]
-    
-    # 获取patent_data文件夹下的所有csv文件的文件路径
-    import os
-    import glob
-    
-    # 指定patent_data文件夹路径
-    patent_data_folder = "patent_data"
-    patent_embedding_folder = "patent_embedding"
-    
-    # 创建嵌入向量保存文件夹（如果不存在）
-    os.makedirs(patent_embedding_folder, exist_ok=True)
-    
-    # 获取所有csv文件路径
-    csv_files = glob.glob(os.path.join(patent_data_folder, "*.csv"))
-    
-    IPC_3s = []
-    for file in csv_files:
-        # 从文件名中提取IPC_3代码
-        file_name = os.path.basename(file)
-        if "patent_data_" in file_name and "_cleaned.csv" in file_name:
-            ipc_code = file_name.replace("patent_data_", "").replace("_cleaned.csv", "")
-            IPC_3s.append(ipc_code)
-    
-    # 定义处理任务函数
-    def process_file(ipc_code, base_url):
-        try:
-            # 构建文件路径
-            patent_file = f'{patent_data_folder}/patent_data_{ipc_code}_cleaned.csv'
-            
-            # 读取专利数据
-            patent_df = pd.read_csv(patent_file)
-            patent_df = patent_df.fillna("")
-            
-            print(f"开始处理 {ipc_code} 的标题，使用服务 {base_url}")
-            
-            # 处理专利标题
-            field = 'title'
-            id_field = 'id'
-            batch_size = 5000
-            output_file = f'{patent_embedding_folder}/patent_title_{ipc_code}_embeddings.npz'
-            process_embeddings(patent_df, field, id_field, batch_size, output_file, base_url=base_url, save_batch_size=1000)
-            
-            print(f"开始处理 {ipc_code} 的摘要，使用服务 {base_url}")
-            
-            # 处理专利摘要
-            field = 'brief'
-            batch_size = 300
-            output_file = f'{patent_embedding_folder}/patent_brief_{ipc_code}_embeddings.npz'
-            process_embeddings(patent_df, field, id_field, batch_size, output_file, base_url=base_url, save_batch_size=3000)
-            
-            print(f"完成处理 {ipc_code}，使用服务 {base_url}")
-            return True
-        except Exception as e:
-            print(f"处理 {ipc_code} 时出错: {str(e)}")
-            return False
-    
-    # 使用线程池并行处理文件
-    with ThreadPoolExecutor(max_workers=len(base_urls)) as executor:
-        # 初始提交任务，每个服务分配一个文件
-        future_to_ipc = {}
-        for i, ipc_code in enumerate(IPC_3s[:min(len(base_urls), len(IPC_3s))]):
-            future = executor.submit(process_file, ipc_code, base_urls[i])
-            future_to_ipc[future] = (ipc_code, base_urls[i], i)
-        
-        # 待处理的IPC代码索引
-        next_ipc_index = min(len(base_urls), len(IPC_3s))
-        
-        # 当一个任务完成时，提交新任务
-        import concurrent.futures
+
+    with ThreadPoolExecutor(max_workers=len(EMBEDDING_SERVERS)) as executor:
+        future_to_ipc = {
+            executor.submit(process_file, ipc_code, EMBEDDING_SERVERS[i]): (ipc_code, EMBEDDING_SERVERS[i], i)
+            for i, ipc_code in enumerate(IPC_3s[:len(EMBEDDING_SERVERS)])
+        }
+        next_ipc_index = len(future_to_ipc)
+
         while future_to_ipc:
-            # 获取已完成的任务
             done, _ = concurrent.futures.wait(
-                future_to_ipc, 
+                future_to_ipc,
                 return_when=concurrent.futures.FIRST_COMPLETED
             )
-            
             for future in done:
-                ipc_code, base_url, url_index = future_to_ipc[future]
-                del future_to_ipc[future]
-                
+                ipc_code, base_url, url_index = future_to_ipc.pop(future)
                 try:
-                    result = future.result()
+                    future.result()
                 except Exception as e:
-                    print(f"处理 {ipc_code} 时发生异常: {str(e)}")
-                
-                # 如果还有待处理的文件，则分配给空闲的服务
+                    print(f"处理 {ipc_code} 时发生异常: {e}")
+
                 if next_ipc_index < len(IPC_3s):
                     next_ipc = IPC_3s[next_ipc_index]
-                    future = executor.submit(process_file, next_ipc, base_url)
-                    future_to_ipc[future] = (next_ipc, base_url, url_index)
+                    future_to_ipc[executor.submit(process_file, next_ipc, base_url)] = (next_ipc, base_url, url_index)
                     next_ipc_index += 1
-    
+
     print("所有文件处理完成！")
