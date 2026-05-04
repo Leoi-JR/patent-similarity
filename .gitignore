@@ -1,0 +1,16 @@
+# 数据文件
+patent_data/
+patent_embedding/
+similarity_results_gpu/
+model/
+
+# 大文件
+*.npz
+*.parquet
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
