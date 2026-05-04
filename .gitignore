@@ -9,6 +9,10 @@ model/
 *.parquet
 *.csv
 
+# Claude Code
+.claude/
+CLAUDE.md
+
 # Python
 __pycache__/
 *.pyc
