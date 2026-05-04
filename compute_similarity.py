@@ -116,37 +116,49 @@ def save_results(results, output_dir, tag):
     df.to_parquet(f'{output_dir}/similiarity_results_{tag}.parquet', index=False)
 
 
-def process_ipc(ipc_code, gpu_id):
+def process_ipc(ipc_code, gpu_id,
+                patent_data_dir=None, patent_embedding_dir=None,
+                ipc_categories_file=None, output_dir=None,
+                threshold=None, top_k=None, batch_size=None):
     setup_gpu(gpu_id)
 
+    _patent_data_dir = patent_data_dir or PATENT_DATA_DIR
+    _patent_embedding_dir = patent_embedding_dir or PATENT_EMBEDDING_DIR
+    _ipc_categories_file = ipc_categories_file or IPC_CATEGORIES_FILE
+    _output_dir = output_dir or SIMILARITY_OUTPUT_DIR
+    _threshold = threshold if threshold is not None else SIMILARITY_THRESHOLD
+    _top_k = top_k if top_k is not None else TOP_K_NEIGHBORS
+    _batch_size = batch_size or SIMILARITY_BATCH_SIZE
+
     merged_df = load_data(
-        os.path.join(PATENT_DATA_DIR, f'patent_data_{ipc_code}_cleaned.csv'),
-        IPC_CATEGORIES_FILE,
+        os.path.join(_patent_data_dir, f'patent_data_{ipc_code}_cleaned.csv'),
+        _ipc_categories_file,
     )
     feature_matrices_gpu, n = create_feature_matrices(merged_df, IPC_WEIGHTS)
 
     brief_emb, brief_ids = load_embeddings(
-        os.path.join(PATENT_EMBEDDING_DIR, f'patent_brief_{ipc_code}_embeddings_0.npz'))
+        os.path.join(_patent_embedding_dir, f'patent_brief_{ipc_code}_embeddings_0.npz'))
     title_emb, _ = load_embeddings(
-        os.path.join(PATENT_EMBEDDING_DIR, f'patent_title_{ipc_code}_embeddings_0.npz'))
+        os.path.join(_patent_embedding_dir, f'patent_title_{ipc_code}_embeddings_0.npz'))
 
     patent_ids = brief_ids.tolist()
-    total_batches = (n + SIMILARITY_BATCH_SIZE - 1) // SIMILARITY_BATCH_SIZE
+    total_batches = (n + _batch_size - 1) // _batch_size
     accumulated = []
 
     for i in tqdm(range(total_batches), desc=f"{ipc_code} 批次"):
         batch_results = process_batch(
-            i, SIMILARITY_BATCH_SIZE, n, feature_matrices_gpu, IPC_WEIGHTS,
+            i, _batch_size, n, feature_matrices_gpu, IPC_WEIGHTS,
             brief_emb, title_emb, patent_ids,
+            threshold=_threshold, top_k=_top_k,
         )
         for res in batch_results:
-            accumulated.extend(res[:TOP_K_NEIGHBORS + 1])
+            accumulated.extend(res)
         if i > 0 and i % SIMILARITY_SAVE_BATCH == 0:
-            save_results(accumulated, SIMILARITY_OUTPUT_DIR, f'{ipc_code}_{i}')
+            save_results(accumulated, _output_dir, f'{ipc_code}_{i}')
             accumulated = []
 
     if accumulated:
-        save_results(accumulated, SIMILARITY_OUTPUT_DIR, f'{ipc_code}_{total_batches}')
+        save_results(accumulated, _output_dir, f'{ipc_code}_{total_batches}')
 
 
 def worker(gpu_id, ipc_queue):

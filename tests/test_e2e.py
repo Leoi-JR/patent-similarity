@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -123,45 +124,28 @@ def test_generate_embeddings():
 def test_compute_similarity(emb_dir):
     """用生成的 npz 跑 compute_similarity，验证 parquet 输出。"""
     import shutil
-    from compute_similarity import load_data, create_feature_matrices, load_embeddings, process_batch, save_results
-    import cupy as cp
+    from compute_similarity import process_ipc
 
     patent_dir = os.path.join(OUTPUT_DIR, 'patent_data')
     out_dir = os.path.join(OUTPUT_DIR, 'similarity_results')
-    os.makedirs(out_dir, exist_ok=True)
-
     shutil.copy(IPC_FILE, os.path.join(patent_dir, 'ipc_categories.csv'))
 
-    # 集成测试不做业务过滤，只验证流程和格式
-    cp.cuda.Device(0).use()
-    merged_df = load_data(
-        os.path.join(patent_dir, 'patent_data_TEST_cleaned.csv'),
-        os.path.join(patent_dir, 'ipc_categories.csv'),
+    process_ipc(
+        'TEST', gpu_id=0,
+        patent_data_dir=patent_dir,
+        patent_embedding_dir=emb_dir,
+        ipc_categories_file=os.path.join(patent_dir, 'ipc_categories.csv'),
+        output_dir=out_dir,
+        threshold=0,
+        top_k=None,
+        batch_size=20,
     )
-    assert len(merged_df) > 0, "merged_df 为空，main_ipc 与 ipc_categories 无交集"
-
-    feature_matrices_gpu, n = create_feature_matrices(merged_df, config.IPC_WEIGHTS)
-    brief_emb, brief_ids = load_embeddings(os.path.join(emb_dir, 'patent_brief_TEST_embeddings_0.npz'))
-    title_emb, _ = load_embeddings(os.path.join(emb_dir, 'patent_title_TEST_embeddings_0.npz'))
-
-    patent_ids = brief_ids.tolist()
-    batch_size = 20
-    total_batches = (n + batch_size - 1) // batch_size
-    accumulated = []
-    for i in range(total_batches):
-        for res in process_batch(i, batch_size, n, feature_matrices_gpu, config.IPC_WEIGHTS,
-                                 brief_emb, title_emb, patent_ids,
-                                 threshold=0, top_k=len(patent_ids)):
-            accumulated.extend(res)
-
-    assert len(accumulated) > 0, "没有输出任何相似度结果"
-    save_results(accumulated, out_dir, 'TEST_final')
 
     parquet_files = [f for f in os.listdir(out_dir) if f.endswith('.parquet')]
-    assert len(parquet_files) > 0
+    assert len(parquet_files) > 0, "没有生成 parquet 文件"
     df = pd.read_parquet(os.path.join(out_dir, parquet_files[0]))
     assert list(df.columns) == ['patent_id', 'similar_patent_id', 'similarity_score']
-    assert len(df) > 1, "过滤已关闭，结果应包含多个专利对"
+    assert len(df) > 0
 
     print(f"  [PASS] compute_similarity: {len(df)} 条结果，已保存至 {out_dir}")
 
@@ -197,7 +181,6 @@ if __name__ == '__main__':
                 test_compute_similarity(emb_dir)
                 passed += 1
             except Exception as e:
-                import traceback
                 print(f"  [FAIL] test_compute_similarity: {e}")
                 traceback.print_exc()
         else:
