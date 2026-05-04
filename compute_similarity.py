@@ -67,7 +67,8 @@ def load_embeddings(file_name):
 
 
 def process_batch(i, batch_size, n, feature_matrices_gpu, weights,
-                  brief_emb, title_emb, patent_ids):
+                  brief_emb, title_emb, patent_ids,
+                  threshold=None, top_k=None):
     start_i = i * batch_size
     end_i = min((i + 1) * batch_size, n)
 
@@ -91,12 +92,14 @@ def process_batch(i, batch_size, n, feature_matrices_gpu, weights,
     ).get()
 
     results = []
+    _threshold = SIMILARITY_THRESHOLD if threshold is None else threshold
+    _top_k = TOP_K_NEIGHBORS if top_k is None else top_k
     for row_idx in range(score_matrix.shape[0]):
         row = score_matrix[row_idx]
-        mask = row > SIMILARITY_THRESHOLD
+        mask = row > _threshold
         valid = np.where(mask)[0]
-        if len(valid) > TOP_K_NEIGHBORS:
-            top_idx = valid[np.argsort(row[valid])[-TOP_K_NEIGHBORS:]]
+        if len(valid) > _top_k:
+            top_idx = valid[np.argsort(row[valid])[-_top_k:]]
             top_idx = top_idx[np.argsort(-row[top_idx])]
         else:
             top_idx = valid[np.argsort(-row[valid])]

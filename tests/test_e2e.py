@@ -133,8 +133,6 @@ def test_compute_similarity(emb_dir):
     shutil.copy(IPC_FILE, os.path.join(patent_dir, 'ipc_categories.csv'))
 
     # 集成测试不做业务过滤，只验证流程和格式
-    config.SIMILARITY_THRESHOLD = 0
-
     cp.cuda.Device(0).use()
     merged_df = load_data(
         os.path.join(patent_dir, 'patent_data_TEST_cleaned.csv'),
@@ -152,8 +150,9 @@ def test_compute_similarity(emb_dir):
     accumulated = []
     for i in range(total_batches):
         for res in process_batch(i, batch_size, n, feature_matrices_gpu, config.IPC_WEIGHTS,
-                                 brief_emb, title_emb, patent_ids):
-            accumulated.extend(res[:config.TOP_K_NEIGHBORS + 1])
+                                 brief_emb, title_emb, patent_ids,
+                                 threshold=0, top_k=len(patent_ids)):
+            accumulated.extend(res)
 
     assert len(accumulated) > 0, "没有输出任何相似度结果"
     save_results(accumulated, out_dir, 'TEST_final')
