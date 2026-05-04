@@ -7,10 +7,10 @@
 相似度分数由三部分加权合成：
 
 ```
-score = IPC结构相似度 × 0.4 + 摘要向量余弦相似度 × 0.4 + 标题向量余弦相似度 × 0.2
+score = IPC结构相似度 × 0.4 + 摘要向量相似度 × 0.4 + 标题向量相似度 × 0.2
 ```
 
-IPC 结构相似度为 level3/4/5 稀疏独热重叠的加权求和（权重 0.2 / 0.3 / 0.5）。只保留 score > 0.75 的专利对，每个专利最多保留 1000 个最近邻。
+IPC 结构相似度为 level3/4/5 稀疏独热重叠的加权求和（权重 0.2 / 0.3 / 0.5）。当前使用的 embedding 模型输出向量可按已归一化处理，因此向量部分直接使用点积。相似度结果在导出前会裁剪到 `[0, 1]`。最终结果只保留 `score > 0.75` 的非自身专利对，每个专利最多保留 1000 个最近邻。
 
 ## 环境准备
 
@@ -26,7 +26,7 @@ conda create -n patent python=3.10
 patent_data/             # 输入：patent_data_<IPC>_cleaned.csv（列：id, title, brief, main_ipc）
                          #       ipc_categories_updated.csv（IPC 层级查找表）
 patent_embedding/        # 中间结果：patent_title_<IPC>_embeddings_0.npz / patent_brief_<IPC>_embeddings_0.npz
-similarity_results_gpu/  # 输出：similiarity_results_<IPC>_<batch>.parquet
+similarity_results_gpu/  # 输出：similarity_results_<IPC>_<batch>.parquet
 model/                   # ModelScope 模型缓存
 ```
 
@@ -76,14 +76,23 @@ model/                   # ModelScope 模型缓存
 ## 测试
 
 ```bash
-# 冒烟测试（CPU，无需 GPU，随时可跑）
+# 冒烟测试（CPU，无需 GPU，走真实相似度计算主流程）
 /opt/conda/envs/patent/bin/pytest tests/test_compute_similarity.py -v
 
-# 端到端集成测试（需要 GPU 0 和 GPU 1）
+# 端到端集成测试（启动真实 embedding 服务；有 CUDA 时继续验证 GPU 相似度计算）
 /opt/conda/envs/patent/bin/pytest tests/test_e2e.py -v
+
+# 按 marker 运行
+/opt/conda/envs/patent/bin/pytest -m smoke -v
+/opt/conda/envs/patent/bin/pytest -m integration -v
 ```
 
-测试输出保存在 `tests/output/`。
+测试使用临时目录隔离输入输出，不再依赖固定的 `tests/output/` 目录。集成测试会校验：
+- title/brief embedding id 顺序一致
+- 相似度结果不包含自身匹配
+- `similarity_score` 位于 `[0, 1]`
+- embedding 批次请求失败时立即报错，不静默跳过
+- `generate_embedding.py` 在任一 IPC 失败时以失败状态退出
 
 ## 文件结构
 

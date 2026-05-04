@@ -20,27 +20,21 @@ from config import (
 
 def embed(text_list, base_url):
     url = f"{base_url}/embed"
-    
-    # 准备要嵌入的文本列表
+
     payload = {
         "texts": text_list
     }
-    
+
     headers = {
         "Content-Type": "application/json"
     }
-    
-    # 发送POST请求
-    response = requests.post(url, data=json.dumps(payload), headers=headers)
-    
-    # 返回结果
-    if response.status_code == 200:
-        result = response.json()
-        return result["embeddings"]
-    else:
-        print(f"请求失败: {response.status_code}")
-        print(response.text)
-        return None
+
+    response = requests.post(url, data=json.dumps(payload), headers=headers, timeout=60)
+    response.raise_for_status()
+    result = response.json()
+    if "embeddings" not in result:
+        raise ValueError("embedding 服务响应缺少 embeddings 字段")
+    return result["embeddings"]
 
 def process_embeddings(patent_df, field, id_field, batch_size, output_file, base_url, save_batch_size=1000):
     # 获取总数据量
@@ -66,22 +60,21 @@ def process_embeddings(patent_df, field, id_field, batch_size, output_file, base
         
         # 获取嵌入向量
         embeddings = embed(batch_texts, base_url=base_url)
-        if embeddings:
-            current_embeddings.extend(embeddings)
-            current_ids.extend(batch_ids)
-            record_count += len(batch_ids)
-            
-            # 检查是否需要保存当前批次
-            if record_count >= save_batch_size*batch_size:
-                # 保存当前批次
-                save_batch(current_embeddings, current_ids, id_field, f"{file_name}_{batch_count}{file_extension}")
-                print(f"已保存批次 {batch_count}，包含 {len(current_ids)} 条记录")
-                
-                # 重置当前批次的列表
-                current_embeddings = []
-                current_ids = []
-                batch_count += 1
-                record_count = 0
+        if len(embeddings) != len(batch_ids):
+            raise ValueError(f"embedding 数量与输入数量不一致: {len(embeddings)} != {len(batch_ids)}")
+
+        current_embeddings.extend(embeddings)
+        current_ids.extend(batch_ids)
+        record_count += len(batch_ids)
+
+        if record_count >= save_batch_size*batch_size:
+            save_batch(current_embeddings, current_ids, id_field, f"{file_name}_{batch_count}{file_extension}")
+            print(f"已保存批次 {batch_count}，包含 {len(current_ids)} 条记录")
+
+            current_embeddings = []
+            current_ids = []
+            batch_count += 1
+            record_count = 0
     
     # 保存剩余的记录
     if current_ids:
@@ -126,19 +119,19 @@ def process_file(ipc_code, base_url,
     print(f"完成处理 {ipc_code}")
 
 
-
-if __name__ == "__main__":
+def main():
     os.makedirs(PATENT_EMBEDDING_DIR, exist_ok=True)
 
-    IPC_3s = [
+    ipc_codes = [
         os.path.basename(f).replace("patent_data_", "").replace("_cleaned.csv", "")
         for f in glob.glob(os.path.join(PATENT_DATA_DIR, "patent_data_*_cleaned.csv"))
     ]
 
+    failures = []
     with ThreadPoolExecutor(max_workers=len(EMBEDDING_SERVERS)) as executor:
         future_to_ipc = {
             executor.submit(process_file, ipc_code, EMBEDDING_SERVERS[i]): (ipc_code, EMBEDDING_SERVERS[i], i)
-            for i, ipc_code in enumerate(IPC_3s[:len(EMBEDDING_SERVERS)])
+            for i, ipc_code in enumerate(ipc_codes[:len(EMBEDDING_SERVERS)])
         }
         next_ipc_index = len(future_to_ipc)
 
@@ -152,11 +145,20 @@ if __name__ == "__main__":
                 try:
                     future.result()
                 except Exception as e:
+                    failures.append((ipc_code, e))
                     print(f"处理 {ipc_code} 时发生异常: {e}")
+                else:
+                    if next_ipc_index < len(ipc_codes):
+                        next_ipc = ipc_codes[next_ipc_index]
+                        future_to_ipc[executor.submit(process_file, next_ipc, base_url)] = (next_ipc, base_url, url_index)
+                        next_ipc_index += 1
 
-                if next_ipc_index < len(IPC_3s):
-                    next_ipc = IPC_3s[next_ipc_index]
-                    future_to_ipc[executor.submit(process_file, next_ipc, base_url)] = (next_ipc, base_url, url_index)
-                    next_ipc_index += 1
+    if failures:
+        failed_ipcs = ', '.join(ipc_code for ipc_code, _ in failures)
+        raise RuntimeError(f"以下 IPC 处理失败: {failed_ipcs}")
 
     print("所有文件处理完成！")
+
+
+if __name__ == "__main__":
+    main()

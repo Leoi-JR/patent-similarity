@@ -13,8 +13,6 @@ model/
 .claude/
 CLAUDE.md
 
-# 测试输出
-tests/output/
 
 # Python
 __pycache__/

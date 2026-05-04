@@ -66,6 +66,19 @@ def load_embeddings(file_name):
     return data['embeddings'], data['ids']
 
 
+def validate_alignment(merged_df, brief_ids, title_ids):
+    merged_ids = [str(pid) for pid in merged_df['id'].tolist()]
+    brief_ids_list = [str(pid) for pid in brief_ids.tolist()]
+    title_ids_list = [str(pid) for pid in title_ids.tolist()]
+
+    if len(merged_ids) != len(brief_ids_list) or len(merged_ids) != len(title_ids_list):
+        raise ValueError('专利数据与 embedding 数量不一致')
+    if brief_ids_list != title_ids_list:
+        raise ValueError('brief/title embedding id 顺序不一致')
+    if merged_ids != brief_ids_list:
+        raise ValueError('专利数据与 embedding id 顺序不一致')
+
+
 def process_batch(i, batch_size, n, feature_matrices_gpu, weights,
                   brief_emb, title_emb, patent_ids,
                   threshold=None, top_k=None):
@@ -85,10 +98,12 @@ def process_batch(i, batch_size, n, feature_matrices_gpu, weights,
     brief_sim = cp.dot(brief_emb[start_i:end_i], brief_emb.T)
     title_sim = cp.dot(title_emb[start_i:end_i], title_emb.T)
 
-    score_matrix = (
+    score_matrix = cp.clip(
         combined.toarray() * SIMILARITY_WEIGHTS['ipc']
         + brief_sim * SIMILARITY_WEIGHTS['brief']
-        + title_sim * SIMILARITY_WEIGHTS['title']
+        + title_sim * SIMILARITY_WEIGHTS['title'],
+        0.0,
+        1.0,
     ).get()
 
     results = []
@@ -96,6 +111,7 @@ def process_batch(i, batch_size, n, feature_matrices_gpu, weights,
     _top_k = TOP_K_NEIGHBORS if top_k is None else top_k
     for row_idx in range(score_matrix.shape[0]):
         row = score_matrix[row_idx]
+        row[start_i + row_idx] = -np.inf
         mask = row > _threshold
         valid = np.where(mask)[0]
         if len(valid) > _top_k:
@@ -113,7 +129,7 @@ def process_batch(i, batch_size, n, feature_matrices_gpu, weights,
 def save_results(results, output_dir, tag):
     df = pd.DataFrame(results, columns=['patent_id', 'similar_patent_id', 'similarity_score'])
     os.makedirs(output_dir, exist_ok=True)
-    df.to_parquet(f'{output_dir}/similiarity_results_{tag}.parquet', index=False)
+    df.to_parquet(f'{output_dir}/similarity_results_{tag}.parquet', index=False)
 
 
 def process_ipc(ipc_code, gpu_id,
@@ -138,9 +154,10 @@ def process_ipc(ipc_code, gpu_id,
 
     brief_emb, brief_ids = load_embeddings(
         os.path.join(_patent_embedding_dir, f'patent_brief_{ipc_code}_embeddings_0.npz'))
-    title_emb, _ = load_embeddings(
+    title_emb, title_ids = load_embeddings(
         os.path.join(_patent_embedding_dir, f'patent_title_{ipc_code}_embeddings_0.npz'))
 
+    validate_alignment(merged_df, brief_ids, title_ids)
     patent_ids = brief_ids.tolist()
     total_batches = (n + _batch_size - 1) // _batch_size
     accumulated = []
