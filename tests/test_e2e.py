@@ -7,7 +7,7 @@
     - 至少 1 个可用计算设备；若无 CUDA，则服务会退回 CPU
 
 运行方式：
-    /opt/conda/envs/patent/bin/pytest tests/test_e2e.py -v
+    pytest tests/test_e2e.py -v
 """
 
 import os

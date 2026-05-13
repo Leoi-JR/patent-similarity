@@ -20,24 +20,24 @@ EMBEDDING_SAVE_BATCH_SIZE = 1000
 PATENT_DATA_DIR = "patent_data"
 PATENT_EMBEDDING_DIR = "patent_embedding"
 SIMILARITY_OUTPUT_DIR = "similarity_results_gpu"
-IPC_CATEGORIES_FILE = "patent_data/ipc_categories_updated.csv"
-MODEL_CACHE_DIR = "/workspace/patent/model"
+IPC_CATEGORIES_FILE = "patent_data/ipc_categories.csv"
+MODEL_CACHE_DIR = "./model"
 
-# 相似度计算：IPC 层级权重
+# 相似度计算：IPC 层级权重（越靠近叶节点权重越高，三项之和为 1，按数据集特性调整）
 IPC_WEIGHTS = {
-    "level3_code": 0.2,
-    "level4_code": 0.3,
-    "level5_code": 0.5,
+    "level3_code": 0.2,  # 粗粒度分类
+    "level4_code": 0.3,  # 中粒度分类
+    "level5_code": 0.5,  # 细粒度分类
 }
 
-# 相似度计算：各分量权重
+# 相似度计算：各分量权重（ipc / brief / title 三项之和为 1，按字段信息量调整）
 SIMILARITY_WEIGHTS = {
     "ipc": 0.4,
     "brief": 0.4,
     "title": 0.2,
 }
 
-# 相似度筛选阈值及每个专利最多保留的近邻数
+# 相似度筛选阈值及每个专利最多保留的近邻数（按输出规模需求调整）
 SIMILARITY_THRESHOLD = 0.75
 TOP_K_NEIGHBORS = 1000
 

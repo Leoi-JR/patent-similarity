@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>专利相似度计算系统 · Patent Similarity Pipeline</title>
+<style>
+  /* ── Design Tokens ── */
+  :root {
+    --bg:          #020617;
+    --surface:     #0e1223;
+    --surface-2:   #141a2f;
+    --border:      rgba(255,255,255,0.08);
+    --border-mid:  rgba(255,255,255,0.12);
+    --text:        #f8fafc;
+    --text-dim:    #94a3b8;
+    --text-soft:   #64748b;
+    --accent:      #22c55e;
+    --accent-glow: rgba(34,197,94,0.18);
+    --accent-ring: rgba(34,197,94,0.30);
+    --blue:        #60a5fa;
+    --blue-glow:   rgba(96,165,250,0.15);
+    --gold:        #f59e0b;
+    --red:         #ef4444;
+    --purple:      #c084fc;
+    --radius-lg:   20px;
+    --radius-md:   14px;
+    --radius-sm:   10px;
+    --radius-pill: 999px;
+    --shadow:      0 16px 48px rgba(0,0,0,0.32);
+    --shadow-sm:   0 4px 16px rgba(0,0,0,0.20);
+    --max:         1160px;
+    --transition:  180ms ease;
+  }
+
+  /* ── Reset ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background:
+      radial-gradient(ellipse 60% 40% at 80% 0%,  rgba(34,197,94,0.07)  0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 10% 10%, rgba(96,165,250,0.07) 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 "Liberation Mono", monospace;
+  }
+
+  /* ── Layout ── */
+  .container {
+    width: min(var(--max), calc(100vw - 40px));
+    margin: 0 auto;
+  }
+  section { padding: 88px 0; }
+
+  /* ── Typography ── */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 16px;
+  }
+  .eyebrow::before {
+    content: '';
+    display: block;
+    width: 18px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  h1 {
+    font-size: clamp(36px, 5.5vw, 64px);
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+    font-weight: 800;
+  }
+  h2 {
+    font-size: clamp(26px, 3.8vw, 44px);
+    line-height: 1.14;
+    letter-spacing: -0.035em;
+    font-weight: 800;
+  }
+  h3 {
+    font-size: 18px;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  p { color: var(--text-dim); font-size: 15px; line-height: 1.8; }
+  .accent { color: var(--accent); }
+  .blue   { color: var(--blue);   }
+  .gold   { color: var(--gold);   }
+  .purple { color: var(--purple); }
+
+  /* ── Panel / Card ── */
+  .panel {
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.015));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+  }
+  .card { padding: 24px; }
+  .card-label {
+    color: var(--text-soft);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 10px;
+  }
+
+  /* ── Section header ── */
+  .section-head {
+    max-width: 720px;
+    margin-bottom: 40px;
+  }
+  .section-head p { margin-top: 14px; max-width: 60ch; }
+
+  /* ── Grids ── */
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+
+  /* ── Button ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 46px;
+    padding: 0 22px;
+    border-radius: var(--radius-pill);
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform var(--transition), background var(--transition),
+                box-shadow var(--transition), border-color var(--transition);
+  }
+  .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .btn:hover  { transform: translateY(-2px); }
+  .btn:active { transform: translateY(0px);  }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .btn-primary {
+    background: var(--accent);
+    color: #052e16;
+    border-color: var(--accent);
+    box-shadow: 0 0 24px rgba(34,197,94,0.25);
+  }
+  .btn-primary:hover { box-shadow: 0 0 36px rgba(34,197,94,0.40); }
+  .btn-secondary {
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+    border-color: var(--border-mid);
+  }
+  .btn-secondary:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.20); }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     TOPBAR
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(2,6,23,0.82);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .topbar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    min-height: 64px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    flex-shrink: 0;
+  }
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--blue), var(--accent));
+    box-shadow: 0 0 20px rgba(34,197,94,0.28);
+    flex-shrink: 0;
+  }
+  .brand-name {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+  .brand-sub {
+    display: block;
+    color: var(--text-soft);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-top: 2px;
+  }
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 14px;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition), background var(--transition);
+  }
+  .nav a:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+  .nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .nav-github {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-pill);
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 500;
+    transition: color var(--transition), border-color var(--transition),
+                background var(--transition);
+    cursor: pointer;
+  }
+  .nav-github svg { width: 15px; height: 15px; }
+  .nav-github:hover {
+    color: var(--text);
+    border-color: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.05);
+  }
+  .nav-github:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     HERO
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .hero { padding-top: 80px; padding-bottom: 64px; }
+
+  .hero-layout {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .hero-main { padding: 40px 40px 36px; }
+
+  .hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-glow);
+    border: 1px solid var(--accent-ring);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 22px;
+  }
+  .hero-tag-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(0.85); }
+  }
+
+  .hero-title { margin-bottom: 18px; }
+  .hero-title span { display: block; }
+  .hero-title .sub {
+    font-size: clamp(16px, 2vw, 22px);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    color: var(--text-soft);
+    margin-top: 6px;
+  }
+
+  .hero-desc {
+    font-size: 16px;
+    line-height: 1.75;
+    max-width: 52ch;
+    margin-bottom: 28px;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+
+  /* Tech badges */
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: var(--radius-pill);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    transition: border-color var(--transition), color var(--transition);
+  }
+  .badge:hover { border-color: rgba(255,255,255,0.20); color: var(--text); }
+  .badge.accent-badge { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-glow); }
+  .badge.blue-badge   { color: var(--blue);   border-color: rgba(96,165,250,0.28);  background: var(--blue-glow); }
+
+  /* Hero right side: stat cards */
+  .hero-side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .stat-card {
+    padding: 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    display: grid;
+    place-items: center;
+    margin-bottom: 8px;
+  }
+  .stat-icon svg { width: 18px; height: 18px; }
+  .stat-icon.green  { background: var(--accent-glow); color: var(--accent); }
+  .stat-icon.blue   { background: var(--blue-glow);   color: var(--blue);   }
+  .stat-icon.gold   { background: rgba(245,158,11,0.14); color: var(--gold); }
+  .stat-icon.purple { background: rgba(192,132,252,0.14); color: var(--purple); }
+  .stat-value {
+    font-size: clamp(26px, 3vw, 36px);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .stat-label {
+    color: var(--text-soft);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .stat-desc { color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+
+  /* Hero overview card */
+  .hero-overview {
+    padding: 22px;
+  }
+  .overview-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  .overview-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .overview-row:first-child { padding-top: 0; }
+  .ov-key {
+    color: var(--text-soft);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+  .ov-val {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    text-align: right;
+    line-height: 1.5;
+  }
+  .ov-val code {
+    color: var(--accent);
+    font-size: 12px;
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     ALGORITHM SECTION
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+
+  /* Divider */
+  .section-divider {
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%, var(--border-mid) 30%,
+      var(--border-mid) 70%, transparent 100%);
+    margin: 0;
+  }
+
+  /* Formula box */
+  .formula-wrap {
+    padding: 36px 40px;
+    background: linear-gradient(135deg,
+      rgba(34,197,94,0.10) 0%,
+      rgba(96,165,250,0.07) 50%,
+      rgba(245,158,11,0.06) 100%);
+    border: 1px solid rgba(34,197,94,0.20);
+    margin-bottom: 28px;
+  }
+  .formula-eq {
+    font-size: clamp(16px, 2.2vw, 22px);
+    font-weight: 700;
+    line-height: 2.0;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  .formula-eq .op { color: var(--text-soft); font-weight: 400; margin: 0 6px; }
+  .formula-note {
+    margin-top: 16px;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--text-dim);
+    max-width: 72ch;
+  }
+
+  /* Signal cards */
+  .signal-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  .signal-card {
+    padding: 26px 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .signal-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+  .signal-card.green::before  { background: var(--accent); }
+  .signal-card.blue::before   { background: var(--blue); }
+  .signal-card.gold::before   { background: var(--gold); }
+  .signal-weight {
+    font-size: clamp(32px, 4vw, 48px);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    margin-bottom: 10px;
+  }
+  .signal-card.green .signal-weight { color: var(--accent); }
+  .signal-card.blue  .signal-weight { color: var(--blue);   }
+  .signal-card.gold  .signal-weight { color: var(--gold);   }
+  .signal-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .signal-rationale {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     IPC SECTION
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .ipc-layout {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  /* Tree visualisation */
+  .tree-card { padding: 28px 28px 24px; }
+  .tree-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text-soft);
+    margin-bottom: 20px;
+  }
+  .tree-code {
+    font-size: 13.5px;
+    line-height: 2.1;
+    color: var(--text-dim);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .tree-l1 { color: var(--text-soft); }
+  .tree-l2 { color: var(--text-dim); }
+  .tree-l3 { color: var(--accent); }
+  .tree-l4 { color: var(--blue); }
+  .tree-l5 { color: var(--purple); }
+  .tree-w  { color: var(--gold); font-weight: 600; }
+
+  /* IPC formula strip */
+  .ipc-formula-strip {
+    margin-top: 20px;
+    padding: 16px 20px;
+    background: rgba(245,158,11,0.07);
+    border: 1px solid rgba(245,158,11,0.18);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .ipc-formula-strip code { color: var(--gold); }
+
+  /* IPC right column: 3 feature cards stacked */
+  .ipc-cards { display: flex; flex-direction: column; gap: 14px; }
+
+  /* Implementation detail chip */
+  .impl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 11px;
+    border-radius: var(--radius-pill);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 10px;
+  }
+  .impl-chip code { color: var(--accent); font-size: 11px; }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     EMBEDDING SECTION
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .emb-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    margin-top: 0;
+  }
+  .emb-card { padding: 26px 22px; }
+  .emb-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    display: grid;
+    place-items: center;
+    margin-bottom: 14px;
+  }
+  .emb-icon svg { width: 20px; height: 20px; }
+  .emb-icon.green  { background: var(--accent-glow); color: var(--accent); }
+  .emb-icon.blue   { background: var(--blue-glow);   color: var(--blue);   }
+  .emb-icon.gold   { background: rgba(245,158,11,0.13); color: var(--gold); }
+  .emb-icon.purple { background: rgba(192,132,252,0.13); color: var(--purple); }
+  .emb-card h3 { font-size: 15px; margin-bottom: 8px; }
+  .emb-card p  { font-size: 13px; line-height: 1.7; }
+  .emb-card code { color: var(--accent); font-size: 12px; }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     PIPELINE SECTION
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .pipeline-steps {
+    display: grid;
+    grid-template-columns: 1fr 44px 1fr 44px 1fr;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 24px;
+  }
+  .pipe-step { padding: 28px 26px; }
+  .pipe-num {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgba(34,197,94,0.12);
+    border: 1px solid rgba(34,197,94,0.28);
+    color: var(--accent);
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+  .pipe-step h3 { font-size: 16px; margin-bottom: 10px; }
+  .pipe-connector {
+    display: grid;
+    place-items: center;
+    color: var(--text-soft);
+    font-size: 22px;
+    align-self: center;
+  }
+  .pipe-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  /* Parallel strategy cards */
+  .parallel-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+
+  /* Data flow diagram */
+  .dataflow-wrap { padding: 28px; }
+  .dataflow-caption {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     QUALITY SECTION
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .quality-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  .quality-card { padding: 26px 24px; }
+  .quality-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-sm);
+    display: grid;
+    place-items: center;
+    margin-bottom: 16px;
+  }
+  .quality-icon svg { width: 20px; height: 20px; }
+  .quality-icon.green  { background: var(--accent-glow);              color: var(--accent); }
+  .quality-icon.blue   { background: var(--blue-glow);                color: var(--blue);   }
+  .quality-icon.gold   { background: rgba(245,158,11,0.13);           color: var(--gold);   }
+  .quality-icon.red    { background: rgba(239,68,68,0.13);            color: var(--red);    }
+  .quality-icon.purple { background: rgba(192,132,252,0.13);          color: var(--purple); }
+  .quality-icon.teal   { background: rgba(45,212,191,0.13);           color: #2dd4bf;       }
+  .quality-card h3  { font-size: 15px; margin-bottom: 8px; }
+  .quality-card p   { font-size: 13px; line-height: 1.75; }
+  .quality-card code { color: var(--accent); font-size: 12px; }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     FOOTER
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  .footer {
+    padding: 36px 0 52px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .footer-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .footer p { font-size: 13px; color: var(--text-soft); }
+  .footer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 0 16px;
+    border: 1px solid var(--border-mid);
+    border-radius: var(--radius-pill);
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 500;
+    transition: color var(--transition), border-color var(--transition),
+                background var(--transition);
+    cursor: pointer;
+  }
+  .footer-link svg { width: 15px; height: 15px; }
+  .footer-link:hover {
+    color: var(--text);
+    border-color: rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.04);
+  }
+  .footer-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     RESPONSIVE
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+  @media (max-width: 1080px) {
+    .hero-layout, .ipc-layout, .summary-layout {
+      grid-template-columns: 1fr;
+    }
+    .signal-grid, .emb-grid, .quality-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .pipeline-steps {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .pipe-connector { display: none; }
+    .parallel-cards { grid-template-columns: 1fr; }
+    .dataflow-caption { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 760px) {
+    .container { width: min(var(--max), calc(100vw - 24px)); }
+    section { padding: 64px 0; }
+    .hero { padding-top: 48px; }
+    .hero-main { padding: 26px 22px 24px; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .signal-grid, .emb-grid, .quality-grid { grid-template-columns: 1fr; }
+    .topbar-inner { flex-direction: column; align-items: flex-start; padding: 10px 0; min-height: auto; }
+    .nav { gap: 2px 8px; }
+    .formula-wrap { padding: 24px 20px; }
+    h1 { max-width: none; }
+    h2 { max-width: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ TOPBAR ━━ -->
+<header class="topbar">
+  <div class="container topbar-inner">
+    <a href="#" class="brand" aria-label="回到顶部">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <div class="brand-name">专利相似度计算系统</div>
+        <span class="brand-sub">Patent Similarity Pipeline</span>
+      </div>
+    </a>
+    <nav class="nav" aria-label="页面导航">
+      <a href="#algorithm">算法</a>
+      <a href="#pipeline">架构</a>
+      <a href="#quality">工程质量</a>
+      <a href="https://github.com/Leoi-JR/patent-similarity"
+         target="_blank" rel="noopener noreferrer"
+         class="nav-github"
+         aria-label="查看 GitHub 仓库">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.426 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.866-.013-1.699-2.782.605-3.369-1.343-3.369-1.343-.455-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.748-1.027 2.748-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.481A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z"/>
+        </svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ HERO ━━ -->
+<section class="hero" id="overview">
+  <div class="container hero-layout">
+
+    <!-- Left: main pitch -->
+    <div class="panel hero-main">
+      <div class="hero-tag" aria-hidden="true">
+        <span class="hero-tag-dot"></span>
+        ML · Systems · GPU Computing
+      </div>
+
+      <div class="hero-title">
+        <h1>
+          <span>专利相似度</span>
+          <span><span class="accent">计算系统</span></span>
+        </h1>
+        <span class="sub">Patent Similarity Pipeline</span>
+      </div>
+
+      <p class="hero-desc">
+        一条融合 <strong style="color:var(--text)">IPC 层级结构</strong>与
+        <strong style="color:var(--text)">语义向量</strong>、基于 GPU 批处理的
+        专利相似度计算流水线——把稀疏矩阵运算与稠密向量点积组合成一套可长期运行的工程系统。
+      </p>
+
+      <div class="hero-actions">
+        <a href="https://github.com/Leoi-JR/patent-similarity"
+           target="_blank" rel="noopener noreferrer"
+           class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.426 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.866-.013-1.699-2.782.605-3.369-1.343-3.369-1.343-.455-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.748-1.027 2.748-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.481A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z"/>
+          </svg>
+          查看 GitHub 仓库
+        </a>
+        <a href="#algorithm" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" aria-hidden="true">
+            <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+          </svg>
+          查看算法细节
+        </a>
+      </div>
+
+      <div class="badges" role="list" aria-label="技术栈">
+        <span class="badge accent-badge" role="listitem">Python</span>
+        <span class="badge blue-badge"   role="listitem">PyTorch</span>
+        <span class="badge blue-badge"   role="listitem">CuPy</span>
+        <span class="badge"              role="listitem">ModelScope</span>
+        <span class="badge"              role="listitem">Flask</span>
+        <span class="badge"              role="listitem">SciPy</span>
+        <span class="badge"              role="listitem">NumPy</span>
+        <span class="badge"              role="listitem">Pandas</span>
+        <span class="badge"              role="listitem">pytest</span>
+      </div>
+    </div>
+
+    <!-- Right: stats + overview -->
+    <div class="hero-side">
+      <!-- 4 stat cards -->
+      <div class="stat-grid">
+        <div class="panel stat-card">
+          <div class="stat-icon green" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
+            </svg>
+          </div>
+          <div class="stat-value accent">3</div>
+          <div class="stat-label">步流水线</div>
+          <p class="stat-desc">服务 → 向量化 → 相似度，端到端解耦</p>
+        </div>
+        <div class="panel stat-card">
+          <div class="stat-icon blue" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+            </svg>
+          </div>
+          <div class="stat-value blue">1024</div>
+          <div class="stat-label">维向量</div>
+          <p class="stat-desc">title / brief 分字段生成，独立加权</p>
+        </div>
+        <div class="panel stat-card">
+          <div class="stat-icon gold" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+          <div class="stat-value gold">GPU</div>
+          <div class="stat-label">加速计算</div>
+          <p class="stat-desc">CuPy 稀疏矩阵 + 稠密点积并行加速</p>
+        </div>
+        <div class="panel stat-card">
+          <div class="stat-icon purple" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
+              <path d="M6 21V9a9 9 0 0 0 9 9"/>
+            </svg>
+          </div>
+          <div class="stat-value purple">2</div>
+          <div class="stat-label">双信号融合</div>
+          <p class="stat-desc">结构信号 + 语义信号互补加权</p>
+        </div>
+      </div>
+
+      <!-- Overview table card -->
+      <div class="panel hero-overview">
+        <div class="overview-row">
+          <span class="ov-key">输入</span>
+          <span class="ov-val">按 IPC 分组的专利 CSV<br><code>id · title · brief · main_ipc</code></span>
+        </div>
+        <div class="overview-row">
+          <span class="ov-key">核心算法</span>
+          <span class="ov-val">稀疏 IPC 矩阵 × 权重<br>+ embedding 归一化点积</span>
+        </div>
+        <div class="overview-row">
+          <span class="ov-key">输出</span>
+          <span class="ov-val"><code>patent_id / similar_patent_id / score</code><br>Parquet 格式，top-k 过滤</span>
+        </div>
+        <div class="overview-row">
+          <span class="ov-key">并行策略</span>
+          <span class="ov-val">ThreadPoolExecutor 分发向量化<br>multiprocessing.Queue 调度 GPU</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider" role="separator"></div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ALGORITHM ━━ -->
+<section id="algorithm">
+  <div class="container">
+
+    <div class="section-head">
+      <div class="eyebrow">Core Algorithm</div>
+      <h2>算法核心：<span class="accent">结构信号</span> × <span class="blue">语义信号</span>的加权融合</h2>
+      <p>单纯依赖关键词无法理解语义；单纯依赖向量可能跨领域误判；单纯依赖分类粒度太粗。
+         把"技术结构"与"语义内容"两种信号以不同权重叠加，是这套系统最核心的设计判断。</p>
+    </div>
+
+    <!-- Formula -->
+    <div class="panel formula-wrap">
+      <div class="formula-eq mono">
+        <span style="color:var(--text-soft)">similarity</span>
+        <span class="op">=</span>
+        <span class="accent">IPC结构相似度</span>
+        <span class="op">×</span>
+        <span class="accent">α</span>
+        <br>
+        <span style="padding-left:7.6em"></span>
+        <span class="op">+</span>
+        <span class="blue">摘要向量相似度</span>
+        <span class="op">×</span>
+        <span class="blue">β</span>
+        <br>
+        <span style="padding-left:7.6em"></span>
+        <span class="op">+</span>
+        <span class="gold">标题向量相似度</span>
+        <span class="op">×</span>
+        <span class="gold">γ</span>
+      </div>
+      <p class="formula-note">
+        IPC 结构信号确立技术领域边界，防止跨领域误判；语义向量信号深入技术内容层面，
+        捕捉字面以外的语义接近；两者互补，比任一单独维度都更稳定可靠。
+        最终结果裁剪到 <code style="color:var(--accent)">[0, 1]</code>，
+        阈值过滤 + top-k 截断后写入 Parquet。
+      </p>
+    </div>
+
+    <!-- 3 signal cards -->
+    <div class="signal-grid">
+      <div class="panel signal-card green">
+        <div class="signal-weight">α</div>
+        <p class="signal-rationale">
+          基于 IPC 分类树的稀疏独热重叠计算，确立技术领域边界。
+          防止不同领域因措辞接近而被误判为相似专利。
+        </p>
+      </div>
+      <div class="panel signal-card blue">
+        <div class="signal-weight">β</div>
+        <p class="signal-rationale">
+          摘要包含更完整的技术方案描述，是最强的语义判断依据，
+          与 IPC 信号同权重，共同主导最终分数。
+        </p>
+      </div>
+      <div class="panel signal-card gold">
+        <div class="signal-weight">γ</div>
+        <div class="signal-name">标题向量相似度（Title）</div>
+        <p class="signal-rationale">
+          标题通常更短、更泛化，语义信息密度低于摘要，
+          因此只作为辅助排序信号，而非主要判定基础。
+        </p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider" role="separator"></div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ IPC SECTION ━━ -->
+<section id="ipc">
+  <div class="container">
+
+    <div class="section-head">
+      <div class="eyebrow">IPC Structural Similarity</div>
+      <h2>IPC 结构相似度：<span class="accent">稀疏独热矩阵</span> × 层级权重</h2>
+      <p>越靠近叶节点，说明技术分类越细、越接近，权重也越高。
+         这种表达既保留了分类树的层级信息，又能借助稀疏矩阵乘法做大规模高效计算。</p>
+    </div>
+
+    <div class="ipc-layout">
+      <!-- Left: tree visualisation -->
+      <div class="panel tree-card">
+        <div class="tree-title">IPC 分类树示例 · 层级权重分配</div>
+        <div class="tree-code mono" role="img" aria-label="IPC 分类树层级示意图"><span class="tree-l1">G</span>           物理
+<span class="tree-l1">└</span> <span class="tree-l2">G06</span>       计算；推算；计数
+<span class="tree-l2">  └</span> <span class="tree-l3">G06F</span>     电数字数据处理  <span class="tree-w">× w₃</span>
+<span class="tree-l3">    └</span> <span class="tree-l4">G06F 17</span>  专用计算功能    <span class="tree-w">× w₄</span>
+<span class="tree-l4">      └</span> <span class="tree-l5">G06F 17/16</span> 矩阵运算     <span class="tree-w">× w₅</span></div>
+
+        <div class="ipc-formula-strip mono">
+          IPC_sim
+          <span style="color:var(--text-soft);font-weight:400"> = </span>
+          <code>L3 × w₃</code>
+          <span style="color:var(--text-soft);font-weight:400"> + </span>
+          <code>L4 × w₄</code>
+          <span style="color:var(--text-soft);font-weight:400"> + </span>
+          <code>L5 × w₅</code>
+        </div>
+
+        <p style="margin-top:16px;font-size:13px;">
+          两个专利的 IPC 代码在某层节点相同，该层得 1，否则为 0。
+          三层加权求和即为结构相似度，最大值为 1（所有层完全一致）。
+        </p>
+      </div>
+
+      <!-- Right: 3 feature cards -->
+      <div class="ipc-cards">
+        <div class="panel card">
+          <div class="card-label">数据结构</div>
+          <h3>稀疏独热矩阵（CSR）</h3>
+          <p>对 level3 / level4 / level5 分别建稀疏矩阵。
+             每行对应一个专利，每列对应一个唯一 IPC 节点，
+             命中则置 1，其余为 0。专利数量大时内存效率显著优于稠密表示。</p>
+          <div class="impl-chip">
+            <code>scipy.sparse.csr_matrix</code>
+            <span>→</span>
+            <code>cupy cp_csr_matrix</code>
+          </div>
+        </div>
+        <div class="panel card">
+          <div class="card-label">GPU 加速</div>
+          <h3>稀疏矩阵批量点积</h3>
+          <p>CPU 稀疏矩阵转为 CuPy 稀疏矩阵后，直接在 GPU 上执行
+             <code>batch_feat.dot(feat_matrix.T)</code>，
+             三层结果按权重累加，与 embedding 稠密点积结果合并。</p>
+          <div class="impl-chip">
+            <code>cp_csr_matrix.dot()</code>
+            <span>·</span>
+            <code>.multiply(weight)</code>
+          </div>
+        </div>
+        <div class="panel card">
+          <div class="card-label">设计权衡</div>
+          <h3>为什么不用全 IPC 路径匹配？</h3>
+          <p>全路径完全匹配要求两个专利拥有同一叶节点，召回率极低；
+             仅比较顶层分类则粒度太粗、精度不够。
+             分层加权是在两者之间取得的平衡点。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider" role="separator"></div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ EMBEDDING SECTION ━━ -->
+<section id="embedding">
+  <div class="container">
+
+    <div class="section-head">
+      <div class="eyebrow">Semantic Embedding</div>
+      <h2>语义相似度：<span class="blue">分字段向量化</span> + <span class="accent">归一化点积</span></h2>
+      <p>title 和 brief 分别独立编码为向量文件，在相似度阶段再按权重合成，
+         而不是直接拼接文本——这样可以在最终分数中精确控制每个字段的贡献比例。</p>
+    </div>
+
+    <div class="emb-grid">
+      <div class="panel emb-card">
+        <div class="emb-icon green" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 8v4l3 3"/>
+          </svg>
+        </div>
+        <div class="card-label">Embedding 模型</div>
+        <h3>中文大模型</h3>
+        <p><code>iic/nlp_gte_sentence-embedding_chinese-large</code><br>
+           输出 1024 维归一化向量，专为中文语义匹配设计。
+           通过 ModelScope 本地缓存加载，无需外部 API。</p>
+      </div>
+
+      <div class="panel emb-card">
+        <div class="emb-icon blue" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+        </div>
+        <div class="card-label">编码策略</div>
+        <h3>分字段独立编码</h3>
+        <p>title 与 brief 分别生成独立的 <code>.npz</code> 文件，
+           内含 <code>embeddings</code> 和 <code>ids</code> 两个数组。
+           相似度阶段再按字段权重加权合成，保持精确控制。</p>
+      </div>
+
+      <div class="panel emb-card">
+        <div class="emb-icon gold" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="8" rx="2"/>
+            <rect x="2" y="14" width="20" height="8" rx="2"/>
+            <line x1="6" y1="6" x2="6.01" y2="6"/>
+            <line x1="6" y1="18" x2="6.01" y2="18"/>
+          </svg>
+        </div>
+        <div class="card-label">服务形式</div>
+        <h3>HTTP 服务 per GPU</h3>
+        <p><code>embedding_server.py</code> 封装为 Flask HTTP 服务，
+           每个 GPU 启动一个实例，提供 <code>/embed</code> 接口。
+           天然支持多卡横向并行，无状态设计便于扩展。</p>
+      </div>
+
+      <div class="panel emb-card">
+        <div class="emb-icon purple" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6"  y1="20" x2="6"  y2="14"/>
+          </svg>
+        </div>
+        <div class="card-label">相似度计算</div>
+        <h3>点积 = 余弦相似度</h3>
+        <p>模型输出的向量已经过 L2 归一化，因此两向量的点积
+           等价于余弦相似度，无需额外除以模长。
+           适合在 GPU 上做批量矩阵乘法 <code>cp.dot(A, B.T)</code>。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider" role="separator"></div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ PIPELINE ━━ -->
+<section id="pipeline">
+  <div class="container">
+
+    <div class="section-head">
+      <div class="eyebrow">Pipeline Architecture</div>
+      <h2>工程架构：三步解耦的<span class="accent">批处理流水线</span></h2>
+      <p>每一步只解决一个明确问题：先稳定生产向量，再批量计算相似度，最后把结果写成可消费的结构化文件。步骤之间通过文件解耦，互不依赖，便于单独重跑。</p>
+    </div>
+
+    <!-- Three-step timeline -->
+    <div class="pipeline-steps">
+      <div class="panel pipe-step">
+        <div class="pipe-num" aria-hidden="true">1</div>
+        <h3>启动向量服务</h3>
+        <p>按 GPU 数量启动多个 <code style="color:var(--accent);font-size:12px">embedding_server.py</code> 实例，每个实例绑定一个 GPU，对外暴露 <code style="color:var(--accent);font-size:12px">/embed</code> HTTP 接口。服务无状态，天然支持横向扩展。</p>
+        <div class="pipe-file">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          embedding_server.py
+        </div>
+      </div>
+      <div class="pipe-connector" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+      <div class="panel pipe-step">
+        <div class="pipe-num" aria-hidden="true">2</div>
+        <h3>批量生成向量</h3>
+        <p>扫描 <code style="color:var(--accent);font-size:12px">patent_data/</code> 下所有 IPC 文件，用 <code style="color:var(--blue);font-size:12px">ThreadPoolExecutor</code> 并行分发到各服务。每个 IPC 生成 title / brief 两套 <code style="color:var(--accent);font-size:12px">.npz</code> 文件。</p>
+        <div class="pipe-file">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          generate_embedding.py
+        </div>
+      </div>
+      <div class="pipe-connector" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+      <div class="panel pipe-step">
+        <div class="pipe-num" aria-hidden="true">3</div>
+        <h3>计算相似度</h3>
+        <p>读取 embedding 与 IPC 层级数据，用 <code style="color:var(--blue);font-size:12px">multiprocessing.Queue</code> 实现多 GPU 自动调度。阈值过滤 + top-k 截断后写入 <code style="color:var(--accent);font-size:12px">.parquet</code>。</p>
+        <div class="pipe-file">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          compute_similarity.py
+        </div>
+      </div>
+    </div>
+
+    <!-- Parallel strategy cards -->
+    <div class="parallel-cards">
+      <div class="panel card">
+        <div class="card-label">步骤 2 · 向量化并行策略</div>
+        <h3>ThreadPoolExecutor 多服务分发</h3>
+        <p>Worker 数与 embedding 服务实例数一致。一个 IPC 处理完成后，空闲 worker 立即认领下一个 IPC。任一 IPC 失败记入 <code>failures</code> 列表，主流程结束时统一汇总报错。</p>
+      </div>
+      <div class="panel card">
+        <div class="card-label">步骤 3 · 相似度计算并行策略</div>
+        <h3>multiprocessing.Queue 多 GPU 调度</h3>
+        <p>所有待处理 IPC 入队，每个 GPU 对应一个独立进程，持续 <code>get_nowait()</code> 取任务直到队列为空。GPU 间完全独立，不共享 CuPy 上下文，避免竞争。</p>
+      </div>
+    </div>
+
+    <!-- Data flow diagram -->
+    <div class="panel dataflow-wrap">
+      <svg viewBox="0 0 1100 320" style="width:100%;height:auto" role="img" aria-label="数据流图：专利 CSV 经向量化生成 npz，结合 IPC 映射表计算相似度，输出 parquet">
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+          <marker id="arr-green" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#22c55e"/></marker>
+        </defs>
+        <rect x="20"  y="44"  width="220" height="56" rx="12" fill="#0e1223" stroke="#22c55e" stroke-opacity="0.40"/>
+        <text x="130" y="69"  text-anchor="middle" fill="#f8fafc" font-size="14" font-family="system-ui,sans-serif">patent_data_G06F.csv</text>
+        <text x="130" y="88"  text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">id · title · brief · main_ipc</text>
+        <rect x="400" y="44"  width="220" height="56" rx="12" fill="#0e1223" stroke="#60a5fa" stroke-opacity="0.40"/>
+        <text x="510" y="69"  text-anchor="middle" fill="#f8fafc" font-size="14" font-family="system-ui,sans-serif">generate_embedding.py</text>
+        <text x="510" y="88"  text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">ThreadPoolExecutor · HTTP /embed</text>
+        <rect x="780" y="16"  width="300" height="52" rx="12" fill="#0e1223" stroke="#334155"/>
+        <text x="930" y="40"  text-anchor="middle" fill="#f8fafc" font-size="13" font-family="ui-monospace,monospace">patent_brief_G06F_embeddings_0.npz</text>
+        <text x="930" y="57"  text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">1024-d embeddings + ids</text>
+        <rect x="780" y="88"  width="300" height="52" rx="12" fill="#0e1223" stroke="#334155"/>
+        <text x="930" y="112" text-anchor="middle" fill="#f8fafc" font-size="13" font-family="ui-monospace,monospace">patent_title_G06F_embeddings_0.npz</text>
+        <text x="930" y="129" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">1024-d embeddings + ids</text>
+        <rect x="20"  y="224" width="220" height="56" rx="12" fill="#0e1223" stroke="#f59e0b" stroke-opacity="0.40"/>
+        <text x="130" y="249" text-anchor="middle" fill="#f8fafc" font-size="14" font-family="system-ui,sans-serif">ipc_categories.csv</text>
+        <text x="130" y="268" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">level3 / level4 / level5 映射</text>
+        <rect x="400" y="210" width="220" height="70" rx="12" fill="#0e1223" stroke="#22c55e" stroke-opacity="0.40"/>
+        <text x="510" y="237" text-anchor="middle" fill="#f8fafc" font-size="14" font-family="system-ui,sans-serif">compute_similarity.py</text>
+        <text x="510" y="257" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">IPC 稀疏矩阵 + embedding 点积</text>
+        <text x="510" y="273" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">阈值过滤 · top-k · parquet</text>
+        <rect x="780" y="220" width="300" height="52" rx="12" fill="#0e1223" stroke="#334155"/>
+        <text x="930" y="244" text-anchor="middle" fill="#f8fafc" font-size="14" font-family="system-ui,sans-serif">similarity_results_G06F_5.parquet</text>
+        <text x="930" y="261" text-anchor="middle" fill="#64748b" font-size="11" font-family="system-ui,sans-serif">patent_id · similar_patent_id · score</text>
+        <line x1="240" y1="72"  x2="390" y2="72"  stroke="#22c55e" stroke-width="2.2" marker-end="url(#arr-green)"/>
+        <line x1="620" y1="64"  x2="770" y2="42"  stroke="#64748b" stroke-width="2"   marker-end="url(#arr)"/>
+        <line x1="620" y1="80"  x2="770" y2="114" stroke="#64748b" stroke-width="2"   marker-end="url(#arr)"/>
+        <line x1="240" y1="252" x2="390" y2="252" stroke="#64748b" stroke-width="2"   marker-end="url(#arr)"/>
+        <polyline points="930,68 930,184 620,184 620,210" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arr)"/>
+        <polyline points="930,140 930,196 600,196 600,210" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="620" y1="245" x2="770" y2="245" stroke="#22c55e" stroke-width="2.2" marker-end="url(#arr-green)"/>
+      </svg>
+      <div class="dataflow-caption">
+        <div class="panel card">
+          <div class="card-label">中间文件</div>
+          <h3>.npz 是两阶段的桥梁</h3>
+          <p>每个 IPC × 每个字段生成一个 npz，包含 <code>embeddings</code> 和 <code>ids</code>，两阶段通过文件完全解耦，可单独重跑任意步骤。</p>
+        </div>
+        <div class="panel card">
+          <div class="card-label">一致性保证</div>
+          <h3>先校验 id 顺序，再计算</h3>
+          <p>相似度阶段严格校验 title / brief embedding 与专利数据的 id 列表是否顺序一致，不一致立即报错，防止静默错位。</p>
+        </div>
+        <div class="panel card">
+          <div class="card-label">输出约束</div>
+          <h3>不保留全部配对</h3>
+          <p>移除自身匹配，分数裁剪到 <code>[0,1]</code>，阈值过滤 + top-k 截断，确保输出质量可控、体积合理。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider" role="separator"></div>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ QUALITY ━━ -->
+<section id="quality">
+  <div class="container">
+
+    <div class="section-head">
+      <div class="eyebrow">Engineering Quality</div>
+      <h2>工程质量：让流水线<span class="accent">可以长期稳定运行</span></h2>
+      <p>算法正确只是起点。一个能在生产中持续运行的系统，还需要可靠的错误处理、数据一致性保障、可观测的测试体系。</p>
+    </div>
+
+    <div class="quality-grid">
+      <div class="panel quality-card">
+        <div class="quality-icon green" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div class="card-label">并行调度</div>
+        <h3>多 GPU 自动领任务</h3>
+        <p>IPC 任务入队后，空闲 GPU 进程持续 <code>get_nowait()</code> 认领，无需手动分配。任意数量 GPU 均可直接扩展，整体吞吐随 GPU 数线性提升。</p>
+      </div>
+      <div class="panel quality-card">
+        <div class="quality-icon blue" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0 1 12 2.944a11.955 11.955 0 0 1-8.618 3.04A12.02 12.02 0 0 0 3 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        </div>
+        <div class="card-label">数据一致性</div>
+        <h3>先校验，再计算</h3>
+        <p>相似度计算前对比 <code>patent_df['id']</code>、<code>brief_ids</code>、<code>title_ids</code> 三者顺序。任一不一致立即 <code>raise ValueError</code>，杜绝 embedding 错位导致的静默错误结果。</p>
+      </div>
+      <div class="panel quality-card">
+        <div class="quality-icon red" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="card-label">错误策略</div>
+        <h3>快速失败，不静默跳过</h3>
+        <p>单批 embedding 请求失败立即 <code>raise_for_status()</code> 抛出，不降级为空向量。多 IPC 并行时失败记入列表，主流程结束统一 <code>raise RuntimeError</code>，确保错误可见。</p>
+      </div>
+      <div class="panel quality-card">
+        <div class="quality-icon gold" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        </div>
+        <div class="card-label">内存管理</div>
+        <h3>分批落盘，避免积压</h3>
+        <p>embedding 每攒 <code>save_batch_size</code> 批次写一次 npz；相似度结果每 <code>SIMILARITY_SAVE_BATCH</code> 批次写一次 parquet。大规模数据下不会因内存积压导致 OOM。</p>
+      </div>
+      <div class="panel quality-card">
+        <div class="quality-icon purple" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        </div>
+        <div class="card-label">规模控制</div>
+        <h3>IPC 分桶 + top-k 截断</h3>
+        <p>按 IPC 分组将 O(n²) 全量比较降为组内比较，从根本上控制计算规模。top-k 截断确保每个专利的近邻数有上界，输出文件体积可预测。</p>
+      </div>
+      <div class="panel quality-card">
+        <div class="quality-icon teal" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        </div>
+        <div class="card-label">测试体系</div>
+        <h3>Smoke + Integration</h3>
+        <p><strong style="color:var(--text)">Smoke tests</strong>：CPU 环境，monkeypatch 模拟 CuPy，验证核心相似度计算主流程。<br><strong style="color:var(--text)">Integration tests</strong>：启动真实 embedding 服务，端到端覆盖向量化 → 相似度计算全链路。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<div class="section-divider" role="separator"></div>
+
+</main>
+
+<!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ FOOTER ━━ -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <p>专利相似度计算系统 · Patent Similarity Pipeline</p>
+    <a href="https://github.com/Leoi-JR/patent-similarity"
+       target="_blank" rel="noopener noreferrer"
+       class="footer-link"
+       aria-label="在 GitHub 上查看源码">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.426 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.866-.013-1.699-2.782.605-3.369-1.343-3.369-1.343-.455-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.748-1.027 2.748-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.481A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z"/>
+      </svg>
+      Leoi-JR / patent-similarity
+    </a>
+  </div>
+</footer>
+
+</body>
+</html>

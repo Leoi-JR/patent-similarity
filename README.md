@@ -2,17 +2,17 @@
 
 基于 IPC 层级结构 + 语义向量的专利相似度批量计算流水线。
 
-> 快速了解业务逻辑：[在线演示](https://leoi-jr.github.io/patent-similarity/slides.html)
+> 技术与算法介绍：[在线展示](https://leoi-jr.github.io/patent-similarity/)
 
 ## 原理
 
 相似度分数由三部分加权合成：
 
 ```
-score = IPC结构相似度 × 0.4 + 摘要向量相似度 × 0.4 + 标题向量相似度 × 0.2
+score = IPC结构相似度 × α + 摘要向量相似度 × β + 标题向量相似度 × γ
 ```
 
-IPC 结构相似度为 level3/4/5 稀疏独热重叠的加权求和（权重 0.2 / 0.3 / 0.5）。当前使用的 embedding 模型输出向量可按已归一化处理，因此向量部分直接使用点积。相似度结果在导出前会裁剪到 `[0, 1]`。最终结果只保留 `score > 0.75` 的非自身专利对，每个专利最多保留 1000 个最近邻。
+IPC 结构相似度为 level3/4/5 稀疏独热重叠的加权求和（各层权重在 `config.py` 中可调）。当前使用的 embedding 模型输出向量已归一化，向量部分直接使用点积。相似度结果在导出前裁剪到 `[0, 1]`。阈值和 top-k 均可在 `config.py` 中配置。
 
 ## 环境准备
 
@@ -26,7 +26,7 @@ conda create -n patent python=3.10
 
 ```
 patent_data/             # 输入：patent_data_<IPC>_cleaned.csv（列：id, title, brief, main_ipc）
-                         #       ipc_categories_updated.csv（IPC 层级查找表）
+                         #       ipc_categories.csv（IPC 层级查找表）
 patent_embedding/        # 中间结果：patent_title_<IPC>_embeddings_0.npz / patent_brief_<IPC>_embeddings_0.npz
 similarity_results_gpu/  # 输出：similarity_results_<IPC>_<batch>.parquet
 model/                   # ModelScope 模型缓存
@@ -39,8 +39,8 @@ model/                   # ModelScope 模型缓存
 每个 GPU 启动一个实例，端口与 `config.py` 中 `EMBEDDING_SERVERS` 保持一致：
 
 ```bash
-/opt/conda/envs/patent/bin/python embedding_server.py --port 5000 --gpu 0
-/opt/conda/envs/patent/bin/python embedding_server.py --port 5001 --gpu 1
+python embedding_server.py --port 5000 --gpu 0
+python embedding_server.py --port 5001 --gpu 1
 ```
 
 ### 第二步：批量生成向量
@@ -48,7 +48,7 @@ model/                   # ModelScope 模型缓存
 等服务启动后运行（自动扫描 `patent_data/` 下所有 IPC，多服务并行）：
 
 ```bash
-/opt/conda/envs/patent/bin/python generate_embedding.py
+python generate_embedding.py
 ```
 
 ### 第三步：计算相似度
@@ -57,10 +57,10 @@ model/                   # ModelScope 模型缓存
 
 ```bash
 # 指定 IPC
-/opt/conda/envs/patent/bin/python compute_similarity.py --gpus 0,1,2 --ipc G06F,G01N,H04R
+python compute_similarity.py --gpus 0,1,2 --ipc G06F,G01N,H04R
 
 # 自动扫描所有已有向量的 IPC
-/opt/conda/envs/patent/bin/python compute_similarity.py --gpus 0,1,2
+python compute_similarity.py --gpus 0,1,2
 ```
 
 ## 配置
@@ -70,8 +70,8 @@ model/                   # ModelScope 模型缓存
 | 参数 | 说明 |
 |---|---|
 | `EMBEDDING_SERVERS` | 向量服务地址列表，与启动的服务端口对应 |
-| `SIMILARITY_THRESHOLD` | 相似度过滤阈值（默认 0.75） |
-| `SIMILARITY_BATCH_SIZE` | 相似度计算批次大小，受 GPU 显存限制（默认 300） |
+| `SIMILARITY_THRESHOLD` | 相似度过滤阈值 |
+| `SIMILARITY_BATCH_SIZE` | 相似度计算批次大小，受 GPU 显存限制 |
 | `IPC_WEIGHTS` | IPC 各层级权重 |
 | `SIMILARITY_WEIGHTS` | IPC 结构 / 摘要 / 标题三分量权重 |
 
@@ -79,14 +79,14 @@ model/                   # ModelScope 模型缓存
 
 ```bash
 # 冒烟测试（CPU，无需 GPU，走真实相似度计算主流程）
-/opt/conda/envs/patent/bin/pytest tests/test_compute_similarity.py -v
+pytest tests/test_compute_similarity.py -v
 
 # 端到端集成测试（启动真实 embedding 服务；有 CUDA 时继续验证 GPU 相似度计算）
-/opt/conda/envs/patent/bin/pytest tests/test_e2e.py -v
+pytest tests/test_e2e.py -v
 
 # 按 marker 运行
-/opt/conda/envs/patent/bin/pytest -m smoke -v
-/opt/conda/envs/patent/bin/pytest -m integration -v
+pytest -m smoke -v
+pytest -m integration -v
 ```
 
 测试使用临时目录隔离输入输出，不再依赖固定的 `tests/output/` 目录。集成测试会校验：

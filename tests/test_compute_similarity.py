@@ -2,7 +2,7 @@
 冒烟测试：在 CPU 环境下用小批量 fixture 验证真实相似度计算主流程可用。
 
 运行方式：
-    /opt/conda/envs/patent/bin/pytest tests/test_compute_similarity.py -v
+    pytest tests/test_compute_similarity.py -v
 """
 
 import os
